@@ -1,93 +1,167 @@
 #include <stdio.h>
 #include <string.h>
-
-#include <unistd.h>
-
-#include <netinet/in.h>
-
-#include <sys/socket.h>
+#include <stdlib.h>
 #include <sys/types.h>
-// sys/socket.h and sys/types.h contains the necessary API
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <poll.h>
+
+#define SERVER_PORT 9003
+#define MAX_QUEUE_SIZE 50
+
+/* maximum clients */
+#define MAX_C 5
+
+#define MAX 1024
+
+typedef struct user_info {
+    int socket;
+    char ip_address[16];
+    char username[50];
+} User;
 
 
-/*  Steps for creating and making it server:
- *  -create a socket here too with socket()
- *  -bind the socket to an IP and port with bind()
- *  -after the bind he can start to listen with listen()
- *  -it can accept a connection with accept()
- *  -after accept, it can send() or recv() data 
- **/
+int main() {
+    
+    /* AF_INET -> address familty for the internet protocol v4 */
+    /* SOCK_STREAM -> socket type that open a TCP socket */
+    /* 
+        0 -> a particular protocol to be used with the socket, but usually only
+             a single one exists to support the socket type so we specify it as 0
 
-
-int main(){
-
-    char message_from_server[1024] = "Welcome to La Taifas!";
-
-    //SOCKET <<<
-    //integer for the file descriptor of the socket which contains the information of the socket
-    int socket_descriptor;
-    //integer for the file descriptor of the client socket used for accept function    
-    int client_socket_descriptor;
-
-    /**
-     * create the socket with the socket()
-     * @param AF_INET is the domain of the socket
-     * @param SOCK_STREAM is the type of the socket
-     * @param 0 definition of the protocol, 0 because it's the default protocol TCP/IP
+        socket() returns a file descriptor for the new socket
     */
-    socket_descriptor = socket(AF_INET, SOCK_STREAM, 0);
+    int tcp_socket = socket(AF_INET, SOCK_STREAM, 0);
 
-    //ADDRESS <<<
-    struct sockaddr_in server_address;
-    //family of the address, what type of address we are working with
-    server_address.sin_family = AF_INET;
-    //set the port where to work on
-    //htons() function is called because it knows how to convert an integer so that the structure can understand 
-    server_address.sin_port = htons(9002);
-    //set the ip address
-    //sin_addr is a struct too
-    //INADDR_ANY is a constant actually which is equal with 0
-    //server_address.sin_addr.s_addr = inet_addr("127.0.0.1") <- for another ip address, also INET_ADDR user for IPv4 manipulation NOT IPv6
-    server_address.sin_addr.s_addr = INADDR_ANY;
+    if (tcp_socket == -1) {
+        perror("socket()");
+        exit(EXIT_FAILURE);
+    }
 
-    //BIND <<<
-    /**
-     * bind the socket to the port and IP address specified
-     * @param socket_descriptor the actual socket
-     * @param server_address the server address is a struct of type sockaddr_in and we need to cast it to another struct type sockaddr\
-     * @param size of the address
-     */
-    bind(socket_descriptor, (struct sockaddr * ) &server_address, sizeof(server_address));
+    struct sockaddr_in address;
+    memset(&address, 0, sizeof(address));
 
-    //LISTEN <<<
-    /** 
-     * start listening for connection
-     * @param socket_descriptor the actual socket of the server
-     * @param number_of_clients the number of number of clients
-    */
-    listen(socket_descriptor, 5);
+    address.sin_family = AF_INET;
+    address.sin_port = SERVER_PORT;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
-    //ACCEPT <<<
-    /** 
-     * accept sockets from clients
-     * @param socket_descriptor the actual socket of the server
-     * @param NULL a structure which will store information about from where does the client connect
-     * @param NULL the size of the struct already mentioned
-    */
-    client_socket_descriptor = accept(socket_descriptor, NULL, NULL);
+    if ( bind(tcp_socket, (struct sockaddr*)&address, sizeof(address)) == -1 ) {
+        perror("bind()");
+        exit(EXIT_FAILURE);
+    }
+    
+    if ( listen(tcp_socket, MAX_QUEUE_SIZE) == -1 ) {
+        perror("listen()");
+        exit(EXIT_FAILURE);
+    }
 
-    //SEND <<<
-    /** 
-     * send information to the client
-     * @param client_socket_descriptor the socket of a client
-     * @param message_from_server the data sent
-     * @param sizeof the size of the data we sent
-     * @param 0 flags
-    */
-    send(client_socket_descriptor, message_from_server, sizeof(message_from_server), 0);
+    struct sockaddr_in peer_address;
+    socklen_t paddress_length = sizeof(peer_address);
 
-    //CLOSE <<<
-    //close(socket_descriptor);
+    int new_socket;
+    char client_ip4[20], received_message[MAX];
+    User users[MAX_C];
+    
+    struct pollfd fds[MAX_C];
+    int pos = 0;
 
+    fds[pos].fd = tcp_socket;
+    fds[pos].events = POLLIN;
+    fds[pos].revents = 0;
+    pos++;
+
+    char username[50];
+
+    while (1) {
+        if ( poll(fds, pos, -1) == -1) {
+            perror("poll");
+        }
+
+        for (int i = 0; i < pos; i++) {
+            
+            if (fds[i].fd <= 0) {
+                continue;
+            }
+
+            if (fds[i].revents & POLLIN) {
+                if (fds[i].fd == tcp_socket) {
+                    new_socket = accept(tcp_socket, (struct sockaddr*)&peer_address, &paddress_length);
+
+                    if (new_socket == -1) {
+                        perror("accept()");
+                        continue;
+                    }
+                
+                    if( recv(new_socket, (void*)username, sizeof(username), 0) == -1){
+                        perror("recv()");
+                    }
+                    
+                    fds[pos].fd = new_socket;
+                    fds[pos].events = POLLIN; 
+                    
+                    strcpy(client_ip4, inet_ntoa(peer_address.sin_addr));
+                    printf("Welcome %s to LaTaifas!\n", client_ip4);
+                    
+                    char welcoming_message[MAX];
+                    snprintf(welcoming_message, sizeof(welcoming_message), "[%s] Welcome <%s> to LaTaifas!", client_ip4, username);
+    
+                    users[pos].socket = new_socket;
+                    strcpy(users[pos].ip_address, client_ip4);
+                    strcpy(users[pos].username, username);
+                    strcpy(username, "\0");
+                    pos++;
+                    
+                    for (int i = 0; i < pos; i++) {
+                        if (fds[i].fd != tcp_socket) {
+                            send(fds[i].fd, welcoming_message, sizeof(welcoming_message), 0);
+                        }
+                    }
+                }
+                else {
+                    int read_bytes = recv(fds[i].fd, received_message, sizeof(received_message), 0);
+
+                    if (read_bytes == -1) {
+                        perror("Recv");
+                    }
+                    else if (read_bytes == 0) {
+                        
+                        char goodbye_message[MAX];
+                        snprintf(goodbye_message, sizeof(goodbye_message), "%s has left the chat.", users[i].username);
+                        fprintf(stdout, "%s has left the chat.\n", users[i].ip_address);
+
+                        for (int k = 0; k < pos; k++) {
+                            if (fds[k].fd != tcp_socket && fds[k].fd != users[i].socket) {
+                                send(fds[k].fd, goodbye_message, sizeof(goodbye_message), 0);
+                            }
+                        }
+
+                        if (close(fds[i].fd) == -1) {
+                            perror("Close");
+                        }
+
+                        fds[i].fd = -1;
+                    }
+                    else {                
+                        fprintf(stdout, "[%s]: %s\n", users[i].username, received_message);
+                        char username[50];
+                        snprintf(username, 60, "[%s]: ", users[i].username);
+                        strcat(username, received_message);
+                        snprintf(received_message, sizeof(received_message), "%s", username);
+
+                        for (int k = 0; k < pos; k++) {
+                            if (fds[k].fd != tcp_socket && fds[k].fd != users[i].socket) {
+                               send(fds[k].fd, received_message, sizeof(received_message), 0);
+                            }
+                        }
+                        strcpy(received_message, "\0");
+                    }
+                }
+            }
+        }
+    }
+    close(tcp_socket);    
     return 0;
 }

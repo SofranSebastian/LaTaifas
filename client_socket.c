@@ -1,80 +1,132 @@
 #include <stdio.h>
 #include <string.h>
-
-#include <unistd.h>
-
-#include <netinet/in.h>
-
-#include <sys/socket.h>
+#include <stdlib.h>
 #include <sys/types.h>
-// sys/socket.h and sys/types.h contains the necessary API
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netinet/ip.h>
+#include <unistd.h>
+#include <poll.h>
 
+#define SERVER_PORT 9002
+#define MAX 1024
+#define MAX_USERS 5
 
-/*  Steps for creating and making it retrieve data: 
- *  - is created with a call on the function socket()
- *  - is connected to a remote address with a call on the function connect()
- *  - retrieve data with a call on the function recv()
- **/
+typedef struct user {
+    char username[50], password[50];
+} User;
 
+User users[MAX_USERS] = {
+    {"sorinpui", "sorin123"}, 
+    {"oanatomuta", "oana123"}, 
+    {"sebisofran", "sebi123"},
+    {"bogdansam", "bogdan123"}
+};
 
-int main(){
+int verify_user(char* username, char* password) {
+    for (int i = 0; i < MAX_USERS; i++) {
+        if (strcmp(username, users[i].username) == 0) {
+            if (strcmp(password, users[i].password) == 0) {
+                return 1;
+                break;
+            }
+            else {
+                fprintf(stderr, "Wrong password for user %s\n", users[i].username);
+                exit(EXIT_FAILURE);
+            }
+        }
+    }
+    return 0;
+}
 
-    //SOCKET <<<
-    //integer for the file descriptor of the socket which contains the information of the socket
-    int socket_descriptor;
-    //string for storing the data retrieved from the server
-    char server_response[1024];
+int main(int argc, char* argv[]) {
 
-    /**
-     * create the socket with the socket()
-     * @param AF_INET is the domain of the socket
-     * @param SOCK_STREAM is the type of the socket
-     * @param 0 definition of the protocol, 0 because it's the default protocol TCP/IP
-    */
-    socket_descriptor = socket(AF_INET, SOCK_STREAM, 0);
-
-    //ADDRESS <<<
-    struct sockaddr_in server_address;
-    //family of the address, what type of address we are working with
-    server_address.sin_family = AF_INET;
-    //set the port where to work on
-    //htons() function is called because it knows how to convert an integer so that the structure can understand 
-    server_address.sin_port = htons(9002);
-    //set the ip address
-    //sin_addr is a struct too
-    //INADDR_ANY is a constant actually which is equal with 0
-    //server_address.sin_addr.s_addr = inet_addr("127.0.0.1") <- for another ip address, also INET_ADDR user for IPv4 manipulation NOT IPv6
-    server_address.sin_addr.s_addr = INADDR_ANY;
-
-    //CONNECT <<<
-    /** 
-     * connect the socket with connect()
-     * @param socket_descriptor the actual socket
-     * @param server_address the server address is a struct of type sockaddr_in and we need to cast it to another struct type sockaddr\
-     * @param size of the address
-     * connect() return an integer which is helpful for a simple error handling -> 0 is OK, -1 is NOT OK
-    */
-   int connection_status = connect(socket_descriptor, (struct sockaddr * ) &server_address, sizeof(server_address));
-
-    //check if the connection is ok
-    if( connection_status == -1 ){
-        printf("ERROR: the connection to the remote socket!\n");
+    if (argc < 3) {
+        fprintf(stderr, "Usage: %s username password\n", argv[0]);
+        exit(EXIT_FAILURE);
     }
 
-    //RECEIVE <<<
-    /** 
-     * receive data with recv()
-     * @param socket_descritor the actual socket
-     * @param server_response a place where to store the data which is retrieved from the server
-     * @param sizeof the sizeof of the buffer
-     * @param 0 for the flags
+    if (!verify_user(argv[1], argv[2])) {
+        fprintf(stderr, "User %s doesn't exist.\n", argv[1]);
+        exit(EXIT_FAILURE);
+    }
+
+    /* AF_INET -> address familty for the internet protocol v4 */
+    /* SOCK_STREAM -> socket type that open a TCP socket */
+    /* 
+        0 -> a particular protocol to be used with the socket, but usually only
+             a single one exists to support the socket type so we specify it as 0
+
+        socket() returns a file descriptor for the new socket
     */
-    recv(socket_descriptor, &server_response, sizeof(server_response), 0);
-    //print the data from the server
-    printf("%s\n",server_response);
 
-    //CLOSE <<<
-    //close(socket_descriptor);
+    int tcp_socket = socket(AF_INET, SOCK_STREAM, 0);
 
+    if (tcp_socket == -1) {
+        perror("socket()");
+        exit(EXIT_FAILURE);
+    }
+
+    struct sockaddr_in server_address;
+    memset(&server_address, 0, sizeof(server_address));
+
+    server_address.sin_family = AF_INET;
+    server_address.sin_port = SERVER_PORT;
+    server_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+    int conn = connect(tcp_socket, (struct sockaddr*)&server_address, (socklen_t)sizeof(server_address));
+    
+    if (conn == -1) {
+        perror("connect()");
+        exit(EXIT_FAILURE);
+    }
+    
+    char message_to_send[MAX];
+    char received_message[MAX];
+
+    struct pollfd fds[2];
+
+    fds[0].fd = 0;
+    fds[0].events = POLLIN;
+    fds[1].fd = tcp_socket;
+    fds[1].events = POLLIN;
+
+    if( send(tcp_socket, (void*)argv[1], (size_t)50, 0) == -1 ){
+        perror("send()");
+        exit(EXIT_FAILURE);
+    }
+    
+    while (1) {
+        if ( poll(fds, 2, -1) == -1 ) {
+            perror("poll()");
+        }
+        
+        if (fds[0].revents & POLLIN) {
+            fgets(message_to_send, sizeof(message_to_send)+1, stdin);
+            message_to_send[strlen(message_to_send)-1] = '\0';
+
+            if ( send(tcp_socket, message_to_send, sizeof(message_to_send), 0) == -1 ) {
+                perror("send()");
+            }  
+        }
+
+        if (fds[1].revents & POLLIN) {
+            int recv_bytes = recv(tcp_socket, received_message, sizeof(received_message), 0);
+            if (recv_bytes == -1) {
+                perror("recv message");
+                continue;
+            }
+            else if (recv_bytes == 0) {
+                fprintf(stdout, "Server closed.\n");
+                close(tcp_socket);
+                exit(EXIT_SUCCESS);
+            }
+            else {
+                fprintf(stdout, "%s\n", received_message);
+            }
+        }
+    }
+    close(tcp_socket);
     return 0;
 }
