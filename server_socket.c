@@ -23,7 +23,6 @@ typedef struct user_info {
     char username[50];
 } User;
 
-
 int main() {
     
     /* AF_INET -> address familty for the internet protocol v4 */
@@ -94,7 +93,7 @@ int main() {
                         perror("accept()");
                         continue;
                     }
-                
+
                     if( recv(new_socket, (void*)username, sizeof(username), 0) == -1){
                         perror("recv()");
                     }
@@ -127,7 +126,6 @@ int main() {
                         perror("Recv");
                     }
                     else if (read_bytes == 0) {
-                        
                         char goodbye_message[MAX];
                         snprintf(goodbye_message, sizeof(goodbye_message), "%s has left the chat.", users[i].username);
                         fprintf(stdout, "%s has left the chat.\n", users[i].ip_address);
@@ -138,8 +136,26 @@ int main() {
                             }
                         }
 
+                        char temp_user[50] = "";
+                        char temp_pass[50] = "";
+                        int temp_flag;
+                        
+                        FILE *fp = fopen("loggedusers.txt","r+");
+                        
+                         while(!feof(fp)){
+                            fscanf(fp, "%s", temp_user);
+                            fscanf(fp, "%s", temp_pass);
+                            fscanf(fp, "%d", &temp_flag);
+
+                            if(strcmp(users[i].username, temp_user) == 0){
+                                fseek(fp, ftell(fp)-1, SEEK_SET );
+                                fprintf(fp, "%d", 0);
+                                fclose(fp);
+                            }
+                        }
+
                         if (close(fds[i].fd) == -1) {
-                            perror("Close");
+                            perror("close()");
                         }
 
                         fds[i].fd = -1;

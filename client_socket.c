@@ -9,35 +9,53 @@
 #include <unistd.h>
 #include <poll.h>
 
-#define SERVER_PORT 9002
+#define SERVER_PORT 9003
 #define MAX 1024
-#define MAX_USERS 5
+#define MAX_USERS 4
 
-typedef struct user {
-    char username[50], password[50];
-} User;
+void verify_user(char* username, char* password){
 
-User users[MAX_USERS] = {
-    {"sorinpui", "sorin123"}, 
-    {"oanatomuta", "oana123"}, 
-    {"sebisofran", "sebi123"},
-    {"bogdansam", "bogdan123"}
-};
+    char temp_user[50] = "";
+    char temp_pass[50] = "";
+    int temp_flag;
+    
+    FILE *fp = fopen("loggedusers.txt","r+");
+    
+    while(!feof(fp)){
+        fscanf(fp, "%s", temp_user);
+        fscanf(fp, "%s", temp_pass);
+        fscanf(fp, "%d", &temp_flag);
 
-int verify_user(char* username, char* password) {
-    for (int i = 0; i < MAX_USERS; i++) {
-        if (strcmp(username, users[i].username) == 0) {
-            if (strcmp(password, users[i].password) == 0) {
-                return 1;
-                break;
-            }
-            else {
-                fprintf(stderr, "Wrong password for user %s\n", users[i].username);
+        if(strcmp(username, temp_user) == 0){
+            if(strcmp(password, temp_pass) == 0){
+                if(temp_flag){
+                    fclose(fp);
+                    printf("User %s already logged!\n", username);
+                    exit(EXIT_SUCCESS);
+                }else{
+                    rewind(fp);
+                    while(!feof(fp)){
+                        fscanf(fp, "%s", temp_user);
+                        fscanf(fp, "%s", temp_pass);
+                        fscanf(fp, "%d", &temp_flag);
+                        if(strcmp(username, temp_user) == 0){
+                            fseek(fp, ftell(fp)-1, SEEK_SET );
+                            fprintf(fp, "%d", 1);
+                            fclose(fp);
+                            return;
+                        }
+                    }
+                }
+            }else{
+                printf("Password is wrong!\n");
                 exit(EXIT_FAILURE);
             }
         }
     }
-    return 0;
+
+    printf("User doesn't exist!\n");
+    exit(EXIT_FAILURE);
+    
 }
 
 int main(int argc, char* argv[]) {
@@ -47,10 +65,7 @@ int main(int argc, char* argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    if (!verify_user(argv[1], argv[2])) {
-        fprintf(stderr, "User %s doesn't exist.\n", argv[1]);
-        exit(EXIT_FAILURE);
-    }
+    verify_user(argv[1], argv[2]);
 
     /* AF_INET -> address familty for the internet protocol v4 */
     /* SOCK_STREAM -> socket type that open a TCP socket */
@@ -118,7 +133,25 @@ int main(int argc, char* argv[]) {
                 continue;
             }
             else if (recv_bytes == 0) {
+
+                char temp_user[50] = "";
+                char temp_pass[50] = "";
+                int temp_flag;
+                int users_count = 4;
+
+                FILE *fp = fopen("loggedusers.txt","r+");
+                        
+                while(!feof(fp) && users_count--){
+                    fscanf(fp, "%s", temp_user);
+                    fscanf(fp, "%s", temp_pass);
+                    fscanf(fp, "%d", &temp_flag);
+                
+                    fseek(fp, ftell(fp)-1, SEEK_SET );
+                    fprintf(fp, "%d", 0);
+                }
+                
                 fprintf(stdout, "Server closed.\n");
+                fclose(fp);
                 close(tcp_socket);
                 exit(EXIT_SUCCESS);
             }
