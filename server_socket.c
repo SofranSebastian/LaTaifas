@@ -24,15 +24,7 @@ typedef struct user_info {
 } User;
 
 int main() {
-    
-    /* AF_INET -> address familty for the internet protocol v4 */
-    /* SOCK_STREAM -> socket type that open a TCP socket */
-    /* 
-        0 -> a particular protocol to be used with the socket, but usually only
-             a single one exists to support the socket type so we specify it as 0
 
-        socket() returns a file descriptor for the new socket
-    */
     int tcp_socket = socket(AF_INET, SOCK_STREAM, 0);
 
     if (tcp_socket == -1) {
@@ -47,7 +39,7 @@ int main() {
     address.sin_port = SERVER_PORT;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
-    if ( bind(tcp_socket, (struct sockaddr*)&address, sizeof(address)) == -1 ) {
+    if ( bind(tcp_socket, (struct sockaddr*)&address, (socklen_t)sizeof(address)) == -1 ) {
         perror("bind()");
         exit(EXIT_FAILURE);
     }
@@ -85,7 +77,7 @@ int main() {
                 continue;
             }
 
-            if (fds[i].revents & POLLIN) {
+            if (fds[i].revents & POLLIN) { 
                 if (fds[i].fd == tcp_socket) {
                     new_socket = accept(tcp_socket, (struct sockaddr*)&peer_address, &paddress_length);
 
@@ -94,25 +86,30 @@ int main() {
                         continue;
                     }
 
+                    /* get the username from the client that has connected  */
                     if( recv(new_socket, (void*)username, sizeof(username), 0) == -1){
                         perror("recv()");
                     }
                     
+                    /* add the new socket to the array of file descriptors for poll() */
                     fds[pos].fd = new_socket;
                     fds[pos].events = POLLIN; 
                     
+                    /* convert IP address from network byte order to a more readable form */
                     strcpy(client_ip4, inet_ntoa(peer_address.sin_addr));
+                    
+                    /* print a message in the server for proof that the client has indeed connected */
                     printf("Welcome %s to LaTaifas!\n", client_ip4);
                     
-                    char welcoming_message[MAX];
-                    snprintf(welcoming_message, sizeof(welcoming_message), "[%s] Welcome <%s> to LaTaifas!", client_ip4, username);
-    
                     users[pos].socket = new_socket;
                     strcpy(users[pos].ip_address, client_ip4);
                     strcpy(users[pos].username, username);
-                    strcpy(username, "\0");
                     pos++;
-                    
+
+                    char welcoming_message[MAX];
+                    snprintf(welcoming_message, sizeof(welcoming_message), "[%s] Welcome <%s> to LaTaifas!", client_ip4, username);
+                    strcpy(username, "\0");
+
                     for (int i = 0; i < pos; i++) {
                         if (fds[i].fd != tcp_socket) {
                             send(fds[i].fd, welcoming_message, sizeof(welcoming_message), 0);
@@ -140,14 +137,14 @@ int main() {
                         char temp_pass[50] = "";
                         int temp_flag;
                         
-                        FILE *fp = fopen("loggedusers.txt","r+");
+                        FILE *fp = fopen("users.txt","r+");
                         
                          while(!feof(fp)){
                             fscanf(fp, "%s", temp_user);
                             fscanf(fp, "%s", temp_pass);
                             fscanf(fp, "%d", &temp_flag);
 
-                            if(strcmp(users[i].username, temp_user) == 0){
+                            if(strcmp(users[i].username, temp_user) == 0) {
                                 fseek(fp, ftell(fp)-1, SEEK_SET );
                                 fprintf(fp, "%d", 0);
                                 fclose(fp);
