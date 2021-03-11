@@ -28,7 +28,7 @@ void sign_out_users() {
     char temp_user[50] = "";
     char temp_pass[50] = "";
     int temp_flag;
-    int users_count = 4;
+    int users_count = MAX_USERS;
 
     FILE *fp = fopen("users.txt","r+");
             
